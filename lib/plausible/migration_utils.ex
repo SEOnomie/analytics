@@ -78,6 +78,34 @@ defmodule Plausible.MigrationUtils do
     end
   end
 
+  @doc """
+  Table options for `Ecto.Migration.table/2` with the ClickHouse adapter.
+
+  Takes the engine clauses as keyword list (e.g. `order_by: "(site_id, date)"`)
+  and adds `ON CLUSTER '{cluster}'` when clustering is enabled as well as the
+  configured table settings. Use together with `replicated_engine/3`:
+
+      create_if_not_exists table(:imported_visitors,
+                             primary_key: false,
+                             engine: replicated_engine("MergeTree", "imported_visitors"),
+                             options: table_options(order_by: "(site_id, date)")
+                           ) do
+  """
+  def table_options(clauses) when is_list(clauses) do
+    cluster = if cluster_enabled?(), do: [cluster: "{cluster}"], else: []
+
+    settings =
+      case table_settings() do
+        [] ->
+          []
+
+        settings ->
+          [settings: Enum.map_join(settings, ", ", fn {k, v} -> "#{k} = #{encode(v)}" end)]
+      end
+
+    cluster ++ clauses ++ settings
+  end
+
   # See https://clickhouse.com/docs/en/sql-reference/dictionaries#clickhouse for context
   def dictionary_connection_params() do
     IngestRepo.config()

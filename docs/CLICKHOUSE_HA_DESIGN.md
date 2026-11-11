@@ -53,8 +53,8 @@ Ziel dieses Dokuments: technischer Plan fuer Branch `feature/clickhouse-ha`
 ## 2. Ist-Zustand Code (Fork, identisch zu Upstream)
 
 `master` ist ein reiner Spiegel von `plausible/analytics`. Auf
-`feature/clickhouse-ha` sind seit 2026-11-11 die Schritte 1 und 2 (Abschnitt 5)
-umgesetzt, Details in Abschnitt 3.1 unter "Umsetzungsstand" und in 3.3. Die Bestandsaufnahme in
+`feature/clickhouse-ha` sind seit 2026-11-11 die Schritte 1 bis 4 (Abschnitt 5)
+umgesetzt, Details in Abschnitt 3.1 unter "Umsetzungsstand", in 3.2 und 3.3. Die Bestandsaufnahme in
 diesem Abschnitt beschreibt den Upstream-Stand vor dieser Aenderung.
 
 Abgleich 2026-11-11 (Upstream `5716baab58` -> `0c3903a941`, 130 Commits):
@@ -212,6 +212,40 @@ Migrationen umgestellt werden (wie `sessions_v2`/`events_v2` es nach ihrer
 Konvertierung bereits sind), gesteuert ueber `cluster_enabled?/0`. Fuer eine
 echte Neuinstallation reicht eine bedingte Migration ohne Backfill (noch
 keine Daten vorhanden).
+
+**Umsetzungsstand (2026-11-11, Schritte 3 und 4):** Statt raw SQL bleibt die
+Ecto-DSL. `ecto_ch` kann `ON CLUSTER` selbst erzeugen (Tabellen-Option
+`cluster:`, ClickHouse expandiert das Makro auch in Anfuehrungszeichen).
+Neuer Helfer `MigrationUtils.table_options/1` liefert die Optionen
+(`cluster: "{cluster}"` nur mit Schalter, Klauseln, `settings:`), die Engine
+kommt aus `replicated_engine/3`. Umgestellt: `ingest_counters` und die 9
+`imported_*` aus `20211112130238`. `imported_custom_events` hatte schon eigene
+Replicated-Logik und nutzt jetzt `MigrationUtils.cluster?/1`.
+Spaetere `alter table(...)`-Migrationen ohne `ON CLUSTER` sind unkritisch:
+Spalten-ALTERs auf `Replicated*`-Tabellen laufen ueber das Replikations-Log.
+Die V1-Tabellen `events`/`sessions` bleiben bewusst lokal (werden in
+`20230509124919` ohne `ON CLUSTER` wieder geloescht).
+
+Beim End-to-End-Test kam ein weiteres Problem hoch: Der ClickHouse-DDL-Worker
+validiert `ON CLUSTER`-ALTERs in der Datenbank `default`, auch auf dem
+initiierenden Node und unabhaengig von der `default_database` des Users.
+Unqualifizierte Dictionary-Namen in Alias-/Materialized-Spalten
+(`location_data_dict` in `LocationsSync`, `acquisition_channel_*_dict` in den
+SQL-Funktionen von `AcquisitionChannel`) schlagen dann fehl. Im Cluster-Modus
+werden diese Namen jetzt mit der Datenbank qualifiziert, ohne Schalter bleibt
+alles wie bei Upstream.
+
+Verifikation (lokal, CH 25.8.33.6):
+
+- Schalter aus: frische Migration auf Upstream `0c3903a941` und auf dem
+  Branch, `create_table_query` aller 21 Tabellen byte-identisch.
+- Schalter an, 2 Replicas + Keeper: alle 54 Ingest-Migrationen laufen durch,
+  alle Datentabellen `Replicated*`, Schema auf beiden Replicas identisch
+  (ausser `schema_migrations`, siehe Risiken). Gegenueber Single-Node nur
+  Engine und qualifizierte Dictionary-Namen anders.
+- Voraussetzung fuer Neuinstallationen mit Schalter: die Datenbank muss auf
+  allen Replicas existieren (`mix ecto.create` bzw. `createdb` legt sie nur
+  auf dem verbundenen Node an). Bei uns legt der Altinity-Operator sie an.
 
 ### 3.3 Migrationspfad fuer bestehende Installationen (Single -> HA)
 
@@ -430,10 +464,14 @@ nicht replizierte Tabellen), ohne Events seit dem Cutover zu verlieren.
   Migrationslauf auf Replica 1 eine leere Migrationshistorie. Muss vor
   Schritt 5 geloest werden (z.B. Migrationen fest gegen Replica 0 laufen
   lassen oder `schema_migrations` replizieren), offen.
-- **Fresh-Install mit Schalter noch unvollstaendig:** Bis Schritte 3 und 4
-  umgesetzt sind, legt die Ecto-DSL `ingest_counters` und `imported_*` nur
-  lokal an, spaetere Migrationen mit `ON CLUSTER` darauf scheitern auf den
-  anderen Replicas. Den Schalter vorher nicht produktiv setzen.
+- **Datenbank auf allen Replicas:** `createdb`/`ecto.create` legt die
+  ClickHouse-Datenbank nur auf dem verbundenen Node an. Neuinstallationen mit
+  Schalter brauchen sie vorher auf allen Replicas (`CREATE DATABASE ... ON
+  CLUSTER`). Optional spaeter in `createdb` einbauen.
+- **Unqualifizierte Namen bei `ON CLUSTER`:** Neue Upstream-Migrationen mit
+  Dictionary-Referenzen in Spaltenausdruecken brechen im Cluster-Modus, wenn
+  sie den Namen nicht qualifizieren. Bei jedem Upstream-Sync pruefen
+  (Schritt 5: CI-Job mit Schalter faengt das ab).
 
 ## 7. Nicht Teil dieses Vorhabens
 
