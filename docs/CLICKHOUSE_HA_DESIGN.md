@@ -53,8 +53,8 @@ Ziel dieses Dokuments: technischer Plan fuer Branch `feature/clickhouse-ha`
 ## 2. Ist-Zustand Code (Fork, identisch zu Upstream)
 
 `master` ist ein reiner Spiegel von `plausible/analytics`. Auf
-`feature/clickhouse-ha` ist seit 2026-11-11 Schritt 1 (Abschnitt 5) umgesetzt,
-Details in Abschnitt 3.1 unter "Umsetzungsstand". Die Bestandsaufnahme in
+`feature/clickhouse-ha` sind seit 2026-11-11 die Schritte 1 und 2 (Abschnitt 5)
+umgesetzt, Details in Abschnitt 3.1 unter "Umsetzungsstand" und in 3.3. Die Bestandsaufnahme in
 diesem Abschnitt beschreibt den Upstream-Stand vor dieser Aenderung.
 
 Abgleich 2026-11-11 (Upstream `5716baab58` -> `0c3903a941`, 130 Commits):
@@ -124,8 +124,10 @@ aber unvollstaendiges Rohmaterial.
   prueft `active_replicas > 1`; die eigene SQL-Datei
   `priv/data_migrations/NumericIDs/sql/check-replicas.sql.eex` prueft
   stattdessen `SELECT 1 FROM system.replicas WHERE table = 'events'`:
-  Tabellenname `events` statt `events_v2` ist vermutlich eine Altlast aus
-  der V1-Schema-Aera und aktuell wirkungslos/potenzieller Bug.
+  Tabellenname `events` statt `events_v2` sah zunaechst nach Altlast aus.
+  Nachtrag 2026-11-11: `NumericIDs` liest aus der V1-Tabelle `events`, die
+  Pruefung auf die Quelltabelle ist also beabsichtigt, kein Bug. In Schritt 2
+  nur um den Konfig-Schalter ergaenzt.
 - **Keine Migration fuer `ingest_counters` und `imported_*`:** weder Fresh-
   noch Nachtraeglich-Pfad existiert fuer diese 11 Tabellen.
 - **Keine Testabdeckung:** `Makefile` (`make clickhouse`) und
@@ -182,10 +184,26 @@ upstream-tauglich.
 - Tests: `test/plausible/migration_utils_test.exs`.
 - Ohne gesetzten Schalter ist das Verhalten identisch zu Upstream. Bestehende
   Migrationen und Data-Migrationen sind noch nicht auf `replicated_engine/3`
-  umgestellt (Schritte 2 bis 4). Bekannte Altlast fuer Schritt 2: einige
-  Data-Migration-Templates haben `plausible_prod` statt `{database}` im
-  Replikationspfad hart kodiert (`LocationsSync`, `AcquisitionChannel`,
-  `VersionedSessions`, `NumericIDs/create-sessions-v2`).
+  umgestellt (Schritte 3 und 4).
+
+**Umsetzungsstand (2026-11-11, Schritt 2):**
+
+- `MigrationUtils.cluster?/1` (Schalter ODER Tabelle schon repliziert).
+  Darauf umgestellt: `VersionedSessions`, `LocationsSync`,
+  `PopulateEventSessionColumns`. `NumericIDs`: Schalter ODER bestehende
+  Pruefung der V1-Quelltabelle `events`.
+- `20230320094327_create_v2_schemas.exs`: statt fest `@cluster? false` jetzt
+  `cluster_enabled?/0`, Neuinstallationen mit Schalter bekommen
+  `events_v2`/`sessions_v2` repliziert.
+- Replikationspfad in `LocationsSync`, `AcquisitionChannel`,
+  `VersionedSessions` und `NumericIDs/create-sessions-v2` von hart kodiertem
+  `plausible_prod` auf `{database}` umgestellt (wirkt nur beim Anlegen).
+- `ReplicateTable`-Helfer, siehe 3.3.
+- Tests: `test/plausible/data_migration/replicate_table_test.exs`, reine
+  Funktionstests laufen in der normalen Suite, Cluster-Tests mit Tag
+  `:clickhouse_cluster` (standardmaessig ausgeschlossen, `--include
+  clickhouse_cluster` gegen 2 Replicas + Keeper, lokal auf 25.8.33.6
+  verifiziert). Das Compose-Setup dafuer kommt in Schritt 5 ins Repo.
 
 ### 3.2 Fresh-Install-Pfad fuer `ingest_counters` + `imported_*`
 
@@ -198,18 +216,63 @@ keine Daten vorhanden).
 ### 3.3 Migrationspfad fuer bestehende Installationen (Single -> HA)
 
 Statt 11 weiterer Kopien von `VersionedSessions`/`NumericIDs`: ein
-generischer Helfer, z.B. `Plausible.DataMigration.ReplicateTable`,
-parametrisiert mit Tabellenname, Ziel-Engine-Ausdruck und
-ORDER-BY/PARTITION-BY-Klausel, der das bestehende Muster
-(Create-Temp -> Backfill -> `EXCHANGE TABLES`, Fallback Rename) generisch
-durchfuehrt. Fuer Tabellen ohne Partitionierung (die meisten `imported_*`,
-kleines Volumen) genuegt statt Partition-Attach ein einfaches
-`INSERT INTO ... SELECT *`.
+generischer Helfer `Plausible.DataMigration.ReplicateTable`
+(`lib/plausible/data_migration/replicate_table.ex`, umgesetzt 2026-11-11).
+Er liest Engine, Parameter und Klauseln aus `system.tables` und braucht
+deshalb nur den Tabellennamen:
 
-Im gleichen Zug: `NumericIDs`-Bug fixen (`check-replicas.sql.eex` von
-`'events'` auf `'events_v2'`, oder besser: beide Data-Migrationen auf
-`Plausible.IngestRepo.clustered_table?/1` umstellen statt eigener
-SQL-Datei, eliminiert die Inkonsistenz strukturell).
+```elixir
+ReplicateTable.run("events_v2")                     # Single -> Replicated
+ReplicateTable.run("events_v2", dry_run: true)      # nur Statements zeigen
+ReplicateTable.rollback("events_v2")                # Replicated -> Single
+ReplicateTable.drop_leftover("events_v2_backup")    # Alt-Tabelle loeschen
+```
+
+Ablauf (Entscheidung 2026-11-11: **erst tauschen, dann Altdaten
+einhaengen**, damit waehrend der Umstellung kein Event verloren geht und
+Plausible nicht gestoppt werden muss):
+
+1. `CREATE DATABASE IF NOT EXISTS ... ON CLUSTER` und leere
+   Platzhalter-Tabelle mit identischer Struktur auf allen Replicas, die sie
+   noch nicht haben (aus `create_table_query`, `IF NOT EXISTS`). Damit
+   finden alle folgenden `ON CLUSTER`-Statements ueberall dasselbe Schema.
+2. Leere `<table>_swap_tmp` mit Ziel-Engine `ON CLUSTER` anlegen.
+   Replikationspfad `/clickhouse/{cluster}/tables/{shard}/{database}/<table>_<Zeitstempel>`
+   (Zeitstempel verhindert Konflikte mit Keeper-Resten nach Rollback).
+3. `EXCHANGE TABLES <table>_swap_tmp AND <table> ON CLUSTER` (atomar). Ab
+   hier landen neue Inserts in der replizierten Tabelle.
+4. Alte Tabelle per `RENAME ... ON CLUSTER` zu `<table>_backup`.
+5. Auf dem verbundenen Node jede Partition per
+   `ATTACH PARTITION ID ... FROM <table>_backup` einhaengen (Hardlinks,
+   Replicas holen die Parts per Replikation). Funktioniert auch fuer
+   unpartitionierte Tabellen (Partition `all`).
+
+Zwischen 3. und 5. zeigt die Tabelle nur neue Daten, das Dashboard also fuer
+Sekunden bis wenige Minuten unvollstaendige Historie. Eine Sitzung, deren
+Zeilen vor und nach dem Tausch geschrieben werden, rechnet sich nach dem
+Einhaengen ueber `sign` korrekt zusammen (Test vorhanden).
+
+Schutzmechanismen: nur mit gesetztem Schalter, nur `Atomic`-Datenbanken,
+nur `*MergeTree`-Engines, Abbruch wenn `<table>_swap_tmp` oder das Backup
+schon existiert, Abbruch wenn eine andere Replica mehr Zeilen hat als der
+verbundene Node (sonst wuerden nur die falschen Parts eingehaengt).
+
+`<table>_backup` wird nie automatisch geloescht. Es teilt anfangs seine
+Dateien mit der neuen Tabelle (Hardlinks), zusaetzlicher Platz entsteht erst,
+wenn Merges die Parts der neuen Tabelle neu schreiben, maximal die Groesse
+der Alt-Tabelle. Loeschen per `drop_leftover/2`, sobald kein Rueckweg mehr
+gebraucht wird (siehe 4, Rollback).
+
+`rollback/2` nutzt denselben Ablauf in Gegenrichtung (Ziel = Engine ohne
+`Replicated`, Alt-Tabelle wird `<table>_replicated_backup`). Da die
+replizierte Tabelle alte und neue Daten enthaelt, gehen auch nach der
+Umstellung geschriebene Events beim Rueckweg nicht verloren.
+
+`VersionedSessions` und `NumericIDs` werden bewusst **nicht** auf den Helfer
+umgestellt (Entscheidung 2026-11-11): `NumericIDs` ist eine einmalige
+V1->V2-Umwandlung mit Join auf `domains_lookup`, keine Tabellenkopie,
+`VersionedSessions` laeuft in einer historischen Migration. Beide bekommen
+nur Schalter-Erkennung und den `{database}`-Pfad.
 
 ### 3.4 Test-Infrastruktur
 
@@ -285,6 +348,7 @@ da ClickHouse kein einfaches `UPDATE` kennt, bewusst vermieden).
    bestehender Produktivdatenbank** einmalig ausfuehren: dieselbe
    Postgres-Site, derselbe Domain-Eintrag, dieselbe `site_id`, volle
    historische Kontinuitaet ohne Datenuebernahme zwischen Instanzen.
+   Vorher `run(table, dry_run: true)` fuer alle Tabellen pruefen.
 5. Erst danach `CLICKHOUSE_DATABASE_URL` vom gepinnten Pod
    (`chi-plausible-clickhouse-plausible-0-0.clickhouse:8123`) auf den
    lastverteilten Service umstellen, nicht vorher, sonst laufen Queries
@@ -295,6 +359,35 @@ da ClickHouse kein einfaches `UPDATE` kennt, bewusst vermieden).
    aktualisieren/schliessen.
 8. Neue Tenants nach diesem Zeitpunkt starten direkt mit
    `CLICKHOUSE_CLUSTER_NAME` gesetzt: kein Migrationsschritt noetig.
+
+Bestand Prod (gelesen 2026-11-11): Replica 0 haelt `events_v2`
+(221 Mio. Zeilen, 19,3 GiB), `sessions_v2` (18,8 Mio., 3,6 GiB) und Kleinkram
+(`location_data`, `ingest_counters`, `acquisition_channel_*`, zusammen ca.
+5 MiB), alle `imported_*` sowie `events`/`sessions` (V1) und
+`sessions_v2_tmp_versioned` sind leer. Replica 1 hat **alle** Plausible-Tabellen
+bereits angelegt (leer, gleiche Engines), das Schema ist also schon
+symmetrisch. Freier Platz: Replica 0 140 GiB, Replica 1 164 GiB von je 197 GiB.
+
+### Rollback Phase B
+
+Ziel: Rueckkehr zum Stand vor dem Cutover (offizielles `v3.2.1`,
+nicht replizierte Tabellen), ohne Events seit dem Cutover zu verlieren.
+
+1. **Vor dem Cutover:** CNPG-Backup/Snapshot der Plausible-Postgres-DB
+   ziehen und pruefen. Der Fork-Stand migriert Postgres (u.a. OAuth,
+   Team-Deletion, Oban v14), `v3.2.1` laeuft danach nicht mehr ohne Weiteres
+   auf dieser DB. Das ist der eigentliche Engpass des Rueckwegs, nicht HA.
+2. `CLICKHOUSE_DATABASE_URL` zurueck auf den gepinnten Pod (Replica 0).
+3. Je Tabelle `ReplicateTable.rollback(table)`: Daten inkl. der Events seit
+   dem Cutover landen wieder in einer nicht replizierten Tabelle auf
+   Replica 0.
+4. Postgres aus dem Snapshot von 1. wiederherstellen, Image zurueck auf
+   `v3.2.1`, `CLICKHOUSE_CLUSTER_NAME` entfernen. Postgres-seitige
+   Aenderungen seit dem Cutover (neue Sites, Goals, Nutzer) gehen dabei
+   verloren, Events in ClickHouse nicht.
+5. `<table>_backup` und `<table>_replicated_backup` erst loeschen
+   (`drop_leftover/2`), wenn klar ist, dass kein weiterer Rueckweg gebraucht
+   wird, und ein regulaeres CH-Backup nach dem jeweiligen Stand gelaufen ist.
 
 ## 5. Vorschlag Reihenfolge (Umsetzung)
 
@@ -331,6 +424,16 @@ da ClickHouse kein einfaches `UPDATE` kennt, bewusst vermieden).
   Engine, Sharding-Key-Wahl) und ist hier bewusst nicht Teil des Scopes.
 - **Interaktive Prompts:** `run_sql_confirm`/`confirm/3` sind fuer
   automatisierte CI-Laeufe ungeeignet, muessen fuer Tests umgangen werden.
+- **`schema_migrations` in ClickHouse ist `TinyLog`** (nicht repliziert,
+  auf beiden Replicas vorhanden, auf Replica 1 leer). Sobald Plausible ueber
+  den lastverteilten Service verbindet (Phase B Schritt 5), sieht ein
+  Migrationslauf auf Replica 1 eine leere Migrationshistorie. Muss vor
+  Schritt 5 geloest werden (z.B. Migrationen fest gegen Replica 0 laufen
+  lassen oder `schema_migrations` replizieren), offen.
+- **Fresh-Install mit Schalter noch unvollstaendig:** Bis Schritte 3 und 4
+  umgesetzt sind, legt die Ecto-DSL `ingest_counters` und `imported_*` nur
+  lokal an, spaetere Migrationen mit `ON CLUSTER` darauf scheitern auf den
+  anderen Replicas. Den Schalter vorher nicht produktiv setzen.
 
 ## 7. Nicht Teil dieses Vorhabens
 
