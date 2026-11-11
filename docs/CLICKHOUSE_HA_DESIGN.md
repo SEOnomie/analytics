@@ -351,6 +351,42 @@ nur Schalter-Erkennung und den `{database}`-Pfad.
   erwartet an), 27/27 Tests. Ob der Workflow im Fork auf GitHub laeuft
   (Actions dort aktiviert?), ist noch nicht geprueft.
 
+### 3.5 Migrationshistorie: feste Replica fuer Release-Tasks
+
+Entscheidung 2026-11-11: **Variante A**. Neue optionale Variable
+`CLICKHOUSE_MIGRATION_DATABASE_URL` (`IngestRepo`-Config `:migration_url`).
+Ist sie gesetzt, verbindet `Plausible.Release` (`createdb`, `migrate`,
+`pending-migrations`, `rollback`, `seed`) das `IngestRepo` damit, die
+laufende App nutzt weiter `CLICKHOUSE_DATABASE_URL` (lastverteilt). Alle DDL
+laufen ohnehin `ON CLUSTER`, nur die Buchfuehrung liegt auf einer Replica.
+
+Verworfen (vorerst): **Variante B**, `schema_migrations` als
+`ReplicatedMergeTree`. Ecto legt die Tabelle selbst lokal als `TinyLog` an,
+die globale `ecto_ch`-Option fuer Default-Engine/-Optionen wuerde auf alle
+DSL-Tabellen wirken, die bestehende Historie muesste umgezogen werden
+(`ReplicateTable` kann kein `TinyLog`), und Lesen direkt nach Schreiben
+braeuchte Quorum-Einstellungen. Sinnvoll erst fuer einen Upstream-PR.
+
+Folgen von A:
+
+- Fuer Deploys mit Migrationen muss die feste Replica erreichbar sein, sonst
+  scheitert der Migrationsschritt (neuer Pod startet nicht, alte laufen bei
+  Rolling Update weiter, Ingest und Dashboards nicht betroffen).
+- Bei uns: feste Replica = `chi-plausible-clickhouse-plausible-0-0`, dort liegt
+  die bestehende Historie bereits, Phase B braucht keinen Umzug.
+
+**Runbook: feste Replica dauerhaft verloren**
+
+1. Neue feste Replica waehlen (die verbliebene), `CLICKHOUSE_MIGRATION_DATABASE_URL`
+   darauf umstellen.
+2. `schema_migrations` dort wiederherstellen, z.B. aus dem letzten
+   `clickhouse-backup` (Tabelle ist klein) per `clickhouse-backup restore
+   --tables=<db>.schema_migrations`, oder aus einer Kopie der Versionen.
+3. Pruefen: `db pending-migrations` darf nur wirklich neue Migrationen
+   zeigen. Zeigt es alte, Historie unvollstaendig: nicht migrieren, erst
+   Historie vervollstaendigen (Versionen aus `priv/ingest_repo/migrations`
+   bis zum zuletzt deployten Stand eintragen).
+
 ## 4. Rollout auf TG-Infra (zweiphasig)
 
 Entscheidung (Stand 2026-09-14): Zweiphasiger Rollout mit fc-moto (fcm) als
@@ -485,11 +521,11 @@ nicht replizierte Tabellen), ohne Events seit dem Cutover zu verlieren.
 - **Interaktive Prompts:** `run_sql_confirm`/`confirm/3` sind fuer
   automatisierte CI-Laeufe ungeeignet, muessen fuer Tests umgangen werden.
 - **`schema_migrations` in ClickHouse ist `TinyLog`** (nicht repliziert,
-  auf beiden Replicas vorhanden, auf Replica 1 leer). Sobald Plausible ueber
-  den lastverteilten Service verbindet (Phase B Schritt 5), sieht ein
-  Migrationslauf auf Replica 1 eine leere Migrationshistorie. Muss vor
-  Schritt 5 geloest werden (z.B. Migrationen fest gegen Replica 0 laufen
-  lassen oder `schema_migrations` replizieren), offen.
+  auf beiden Replicas vorhanden, auf Replica 1 leer). Ueber den
+  lastverteilten Service saehe ein Migrationslauf auf Replica 1 eine leere
+  Migrationshistorie. **Geloest 2026-11-11 (Variante A, siehe 3.5):**
+  Release-Tasks laufen ueber `CLICKHOUSE_MIGRATION_DATABASE_URL` immer gegen
+  dieselbe Replica.
 - **Datenbank auf allen Replicas:** `createdb`/`ecto.create` legt die
   ClickHouse-Datenbank nur auf dem verbundenen Node an. Neuinstallationen mit
   Schalter brauchen sie vorher auf allen Replicas (`CREATE DATABASE ... ON
