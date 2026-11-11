@@ -88,7 +88,7 @@ defmodule Plausible.DataMigration.LocationsSync do
   end
 
   def run() do
-    cluster? = Plausible.IngestRepo.clustered_table?("sessions_v2")
+    cluster? = Plausible.MigrationUtils.cluster?("sessions_v2")
 
     {:ok, _} = run_sql("truncate-location-data-table", cluster?: cluster?)
 

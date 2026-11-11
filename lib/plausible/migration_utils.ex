@@ -25,6 +25,14 @@ defmodule Plausible.MigrationUtils do
   end
 
   @doc """
+  Whether DDL for `table` should run `ON CLUSTER`: clustering is enabled via
+  config or `table` is already replicated.
+  """
+  def cluster?(table) do
+    cluster_enabled?() or IngestRepo.clustered_table?(table)
+  end
+
+  @doc """
   Returns `ON CLUSTER '{cluster}'` when clustering is enabled via config or
   when `table` is already replicated, otherwise an empty string.
 
@@ -32,7 +40,7 @@ defmodule Plausible.MigrationUtils do
   replicated but lack the config switch.
   """
   def on_cluster_statement(table) do
-    if cluster_enabled?() or IngestRepo.clustered_table?(table) do
+    if cluster?(table) do
       "ON CLUSTER '{cluster}'"
     else
       ""

@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS acquisition_channel_source_category
     category LowCardinality(String)
 )
 <%= if @on_cluster_statement != "" do %>
-ENGINE = ReplicatedMergeTree('/clickhouse/{cluster}/tables/{shard}/plausible_prod/acquisition_channel_source_category', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/{cluster}/tables/{shard}/{database}/acquisition_channel_source_category', '{replica}')
 <% else %>
 ENGINE = MergeTree()
 <% end %>
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS acquisition_channel_paid_sources
     referrer_source String
 )
 <%= if @on_cluster_statement != "" do %>
-ENGINE = ReplicatedMergeTree('/clickhouse/{cluster}/tables/{shard}/plausible_prod/acquisition_channel_paid_sources', '{replica}')
+ENGINE = ReplicatedMergeTree('/clickhouse/{cluster}/tables/{shard}/{database}/acquisition_channel_paid_sources', '{replica}')
 <% else %>
 ENGINE = MergeTree()
 <% end %>

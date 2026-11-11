@@ -23,7 +23,7 @@ if :minio in Keyword.fetch!(ExUnit.configuration(), :include) do
   Plausible.TestUtils.ensure_minio()
 end
 
-default_exclude = [:slow, :minio, :migrations]
+default_exclude = [:slow, :minio, :migrations, :clickhouse_cluster]
 
 # avoid slowdowns contacting the code server
 for {app, _, _} <- Application.loaded_applications() do
