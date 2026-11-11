@@ -57,6 +57,37 @@ defmodule Plausible.MigrationUtilsTest do
     end
   end
 
+  describe "table_options/1" do
+    test "passes clauses through when clustering is disabled" do
+      put_cluster_name(nil)
+
+      assert MigrationUtils.table_options(order_by: "(site_id, date)") == [
+               order_by: "(site_id, date)"
+             ]
+    end
+
+    test "adds the cluster macro when clustering is enabled" do
+      put_cluster_name("test_cluster")
+
+      assert MigrationUtils.table_options(order_by: "(site_id, date)") ==
+               [cluster: "{cluster}", order_by: "(site_id, date)"]
+    end
+
+    test "appends configured table settings" do
+      put_cluster_name(nil)
+
+      config =
+        :plausible
+        |> Application.get_env(Plausible.IngestRepo)
+        |> Keyword.put(:table_settings, storage_policy: "tiered")
+
+      Application.put_env(:plausible, Plausible.IngestRepo, config)
+
+      assert MigrationUtils.table_options(order_by: "id") ==
+               [order_by: "id", settings: "storage_policy = 'tiered'"]
+    end
+  end
+
   describe "replicated_engine/3" do
     test "returns the plain engine when clustering is disabled" do
       put_cluster_name(nil)
