@@ -277,9 +277,31 @@ defmodule Plausible.Release do
     # Start apps necessary for executing migrations
     Enum.each(@start_apps, &Application.ensure_all_started/1)
 
+    use_clickhouse_migration_url()
+
     # Start the Repo(s) for myapp
     IO.puts("Starting repos..")
     Enum.each(repos(), & &1.start_link(pool_size: 2))
+  end
+
+  @doc """
+  Points `Plausible.IngestRepo` at `CLICKHOUSE_MIGRATION_DATABASE_URL` when set.
+
+  ClickHouse keeps the migration history in a non-replicated `schema_migrations`
+  table, so in a replicated setup all release tasks must talk to the same replica.
+  The running app keeps using `CLICKHOUSE_DATABASE_URL`.
+  """
+  def use_clickhouse_migration_url() do
+    config = Application.get_env(@app, Plausible.IngestRepo, [])
+
+    case Keyword.get(config, :migration_url) do
+      url when is_binary(url) and url != "" ->
+        IO.puts("Using CLICKHOUSE_MIGRATION_DATABASE_URL for Plausible.IngestRepo..")
+        Application.put_env(@app, Plausible.IngestRepo, Keyword.put(config, :url, url))
+
+      _ ->
+        :ok
+    end
   end
 
   defp seeds_path(repo), do: priv_path_for(repo, "seeds.exs")

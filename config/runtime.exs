@@ -714,7 +714,11 @@ config :plausible, Plausible.IngestRepo,
   # Opt-in for replicated ClickHouse setups. Only used as an on/off switch:
   # migrations emit `ON CLUSTER '{cluster}'` and Replicated* engines, the actual
   # cluster name is resolved by the `{cluster}` macro of the ClickHouse servers.
-  cluster_name: get_var_from_path_or_env(config_dir, "CLICKHOUSE_CLUSTER_NAME")
+  cluster_name: get_var_from_path_or_env(config_dir, "CLICKHOUSE_CLUSTER_NAME"),
+  # Optional: fixed replica for release migration tasks. The migration history
+  # (`schema_migrations`) is not replicated, so migrations must always run against
+  # the same replica while the app itself may use a load-balanced URL.
+  migration_url: get_var_from_path_or_env(config_dir, "CLICKHOUSE_MIGRATION_DATABASE_URL")
 
 config :plausible, Plausible.AsyncInsertRepo,
   queue_target: 500,

@@ -29,10 +29,16 @@ concurrency:
 
 jobs:
   migrate:
-    name: Migrations and ReplicateTable on a replicated cluster
+    name: Migrations and ReplicateTable on a replicated cluster (${{ matrix.mix_env }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mix_env: ["test", "ce_test"]
     env:
-      MIX_ENV: test
+      MIX_ENV: ${{ matrix.mix_env }}
+      # database name from config/.env.<mix_env>
+      CH_CLUSTER_DB: ${{ matrix.mix_env == 'ce_test' && 'plausible_ce_test' || 'plausible_test' }}
     services:
       postgres:
         image: postgres:18
