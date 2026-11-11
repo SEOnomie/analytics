@@ -7,8 +7,67 @@ defmodule Plausible.MigrationUtils do
 
   alias Plausible.IngestRepo
 
+  @replication_path "/clickhouse/{cluster}/tables/{shard}/{database}"
+
+  @doc """
+  Whether replicated ClickHouse setup was explicitly requested via
+  `CLICKHOUSE_CLUSTER_NAME`.
+
+  The configured value is only used as a switch. Generated SQL relies on the
+  `{cluster}`, `{shard}` and `{replica}` macros defined on the ClickHouse
+  servers, so the cluster name itself never ends up in queries.
+  """
+  def cluster_enabled?() do
+    case IngestRepo.config()[:cluster_name] do
+      name when is_binary(name) -> String.trim(name) != ""
+      _ -> false
+    end
+  end
+
+  @doc """
+  Returns `ON CLUSTER '{cluster}'` when clustering is enabled via config or
+  when `table` is already replicated, otherwise an empty string.
+
+  The replication check is kept as a safety net for installations that are
+  replicated but lack the config switch.
+  """
   def on_cluster_statement(table) do
-    if(IngestRepo.clustered_table?(table), do: "ON CLUSTER '{cluster}'", else: "")
+    if cluster_enabled?() or IngestRepo.clustered_table?(table) do
+      "ON CLUSTER '{cluster}'"
+    else
+      ""
+    end
+  end
+
+  @doc """
+  Builds the engine expression for `table`.
+
+  With clustering enabled, returns the `Replicated*` variant of `engine` using
+  the replication path `#{@replication_path}/<table>` and the `{replica}`
+  macro, followed by `args`. Otherwise returns the plain engine.
+
+  Options:
+
+    * `:args` - engine parameters, e.g. `["sign", "events"]` (default: `[]`)
+    * `:cluster?` - overrides the `cluster_enabled?/0` decision
+
+  ## Examples
+
+      replicated_engine("MergeTree", "ingest_counters")
+      #=> "MergeTree()" or
+      #=> "ReplicatedMergeTree('/clickhouse/{cluster}/tables/{shard}/{database}/ingest_counters', '{replica}')"
+
+      replicated_engine("VersionedCollapsingMergeTree", "sessions_v2", args: ["sign", "events"])
+  """
+  def replicated_engine(engine, table, opts \\ []) when is_binary(engine) and is_binary(table) do
+    args = Keyword.get(opts, :args, [])
+
+    if Keyword.get_lazy(opts, :cluster?, &cluster_enabled?/0) do
+      replication_args = ["'#{@replication_path}/#{table}'", "'{replica}'"]
+      "Replicated#{engine}(#{Enum.join(replication_args ++ args, ", ")})"
+    else
+      "#{engine}(#{Enum.join(args, ", ")})"
+    end
   end
 
   # See https://clickhouse.com/docs/en/sql-reference/dictionaries#clickhouse for context
