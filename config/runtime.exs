@@ -710,7 +710,11 @@ config :plausible, Plausible.IngestRepo,
   ],
   table_settings: [
     storage_policy: get_var_from_path_or_env(config_dir, "CLICKHOUSE_DEFAULT_STORAGE_POLICY")
-  ]
+  ],
+  # Opt-in for replicated ClickHouse setups. Only used as an on/off switch:
+  # migrations emit `ON CLUSTER '{cluster}'` and Replicated* engines, the actual
+  # cluster name is resolved by the `{cluster}` macro of the ClickHouse servers.
+  cluster_name: get_var_from_path_or_env(config_dir, "CLICKHOUSE_CLUSTER_NAME")
 
 config :plausible, Plausible.AsyncInsertRepo,
   queue_target: 500,

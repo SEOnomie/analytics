@@ -52,8 +52,10 @@ Ziel dieses Dokuments: technischer Plan fuer Branch `feature/clickhouse-ha`
 
 ## 2. Ist-Zustand Code (Fork, identisch zu Upstream)
 
-`master` ist ein reiner Spiegel von `plausible/analytics`, `feature/clickhouse-ha`
-enthaelt bisher nur dieses Dokument, noch keinen Code.
+`master` ist ein reiner Spiegel von `plausible/analytics`. Auf
+`feature/clickhouse-ha` ist seit 2026-11-11 Schritt 1 (Abschnitt 5) umgesetzt,
+Details in Abschnitt 3.1 unter "Umsetzungsstand". Die Bestandsaufnahme in
+diesem Abschnitt beschreibt den Upstream-Stand vor dieser Aenderung.
 
 Abgleich 2026-11-11 (Upstream `5716baab58` -> `0c3903a941`, 130 Commits):
 keine Aenderungen an `lib/plausible/migration_utils.ex`,
@@ -161,6 +163,29 @@ upstream-tauglich.
   `cluster_enabled?/0`, sonst die Basis-Engine. Dieses Pfadmuster ist
   bereits das, was Plausibles eigene Templates nutzen (siehe 2.1), wird
   hier nur zentralisiert statt pro Tabelle dupliziert.
+
+**Umsetzungsstand (2026-11-11, Schritt 1):**
+
+- `config/runtime.exs`: `CLICKHOUSE_CLUSTER_NAME` landet als `:cluster_name`
+  in der `Plausible.IngestRepo`-Config (neben `table_settings`). Leer oder
+  nur Leerzeichen gilt als nicht gesetzt.
+- `MigrationUtils.cluster_enabled?/0`: liest `IngestRepo.config()[:cluster_name]`.
+- `MigrationUtils.on_cluster_statement/1`: `cluster_enabled?() or
+  IngestRepo.clustered_table?(table)`. Bei gesetztem Schalter entfaellt die
+  `system.replicas`-Abfrage.
+- `MigrationUtils.replicated_engine(engine, table, opts)`: Engine-Name ohne
+  Klammern, Optionen `:args` (Engine-Parameter, z. B. `["sign", "events"]`)
+  und `:cluster?` (ueberschreibt den Schalter, z. B. fuer das ODER mit
+  `clustered_table?/1` einer Referenztabelle). Pfad
+  `/clickhouse/{cluster}/tables/{shard}/{database}/<table>` mit
+  `'{replica}'`.
+- Tests: `test/plausible/migration_utils_test.exs`.
+- Ohne gesetzten Schalter ist das Verhalten identisch zu Upstream. Bestehende
+  Migrationen und Data-Migrationen sind noch nicht auf `replicated_engine/3`
+  umgestellt (Schritte 2 bis 4). Bekannte Altlast fuer Schritt 2: einige
+  Data-Migration-Templates haben `plausible_prod` statt `{database}` im
+  Replikationspfad hart kodiert (`LocationsSync`, `AcquisitionChannel`,
+  `VersionedSessions`, `NumericIDs/create-sessions-v2`).
 
 ### 3.2 Fresh-Install-Pfad fuer `ingest_counters` + `imported_*`
 
