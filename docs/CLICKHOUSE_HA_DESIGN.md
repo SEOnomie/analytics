@@ -1,7 +1,7 @@
 ---
 status: draft
 autor: Andreas Kaiser (kaiser@tracking-garden.com)
-stand: 2026-09-14
+stand: 2026-11-11
 ---
 
 # ClickHouse HA fuer Plausible: Bestandsaufnahme und Design
@@ -38,20 +38,30 @@ Ziel dieses Dokuments: technischer Plan fuer Branch `feature/clickhouse-ha`
   `ghcr.io/plausible/community-edition:v3.2.1`
   (`infra/plausible-tg-nw2/plausible/30-values-plausible.yaml`, Helm-Chart,
   `clickhouse.enabled: false` da wir den Altinity-CHI separat betreiben).
-  Unser Fork-`master` steht nach dem Sync vom 2026-09-14 auf `5716baab58`,
-  weit vor `v3.2.1`. Ein Rollout des Forks bedeutet also **immer** auch einen
+  Unser Fork-`master` steht nach dem Sync vom 2026-11-11 auf `0c3903a941`
+  (Upstream-Stand 2026-11-10), weit vor `v3.2.1`. Ein Rollout des Forks
+  bedeutet also **immer** auch einen
   Versions-Sprung von `v3.2.1` auf einen deutlich neueren Stand
-  (u.a. neue OAuth-Tabellen, Team-Deletion-Workflows, Oban-v14-Upgrade) --
-  das ist ein eigenes Risiko, unabhaengig von HA, und sollte separat
+  (u.a. neue OAuth-Tabellen, Team-Deletion-Workflows, Oban-v14-Upgrade).
+  Das ist ein eigenes Risiko, unabhaengig von HA, und sollte separat
   verifiziert werden (Migrationen einmal komplett durchlaufen lassen, bevor
   HA obendrauf kommt).
 - CH-Version Prod: `25.8.33.6` (letzter 25.8-LTS-Patch). Plausibles eigene
-  CI/Makefile pinnen `25.11.5.8-alpine` -- Versions-Differenz siehe Risiken
+  CI/Makefile pinnen `25.11.5.8-alpine`, Versions-Differenz siehe Risiken
   (Abschnitt 6).
 
 ## 2. Ist-Zustand Code (Fork, identisch zu Upstream)
 
-Der Fork hat 0 eigene Commits (reiner Spiegel von `plausible/analytics`).
+`master` ist ein reiner Spiegel von `plausible/analytics`, `feature/clickhouse-ha`
+enthaelt bisher nur dieses Dokument, noch keinen Code.
+
+Abgleich 2026-11-11 (Upstream `5716baab58` -> `0c3903a941`, 130 Commits):
+keine Aenderungen an `lib/plausible/migration_utils.ex`,
+`lib/plausible/ingest_repo.ex`, `lib/plausible/data_migration.ex`,
+`priv/ingest_repo/` und den HA-relevanten Data-Migrationen. CI pinnt
+weiterhin `25.11.5.8-alpine`. `config/runtime.exs` hat nur neue Query-Timeouts
+(`CLICKHOUSE_QUERY_TIMEOUT_MS`, `CLICKHOUSE_MAX_EXECUTION_TIME_SEC`)
+bekommen. Die Bestandsaufnahme unten gilt damit unveraendert.
 Es existiert bereits eingebaute, aber unvollstaendige und undokumentierte
 Cluster-Infrastruktur:
 
@@ -64,12 +74,12 @@ Cluster-Infrastruktur:
   (`lib/plausible/ingest_repo.ex`): reine Laufzeit-Erkennung via
   `SELECT sum(active_replicas) FROM system.replicas WHERE table = '...'`.
   Fuer eine noch nicht existierende Tabelle liefert das `0` (kein Crash,
-  aber auch keine Absicht -- eine Neuinstallation kann so nie "weiss", dass
+  aber auch keine Absicht: eine Neuinstallation kann so nie "weiss", dass
   sie HA werden soll).
 - `Plausible.DataMigration` (`lib/plausible/data_migration.ex`): generisches
   Framework fuer manuell angestossene Migrationen (`run_sql/2,3`,
   `run_sql_multi/2,3`, `run_sql_confirm/2,3` mit interaktivem Y/n-Prompt via
-  `IO.gets`). Laut Moduldoc "run via remote shell or otherwise (TBD)" --
+  `IO.gets`). Laut Moduldoc "run via remote shell or otherwise (TBD)",
   nicht Teil von `mix ecto.migrate`, nicht automatisiert.
 - Zwei konkrete, fertige Daten-Migrationen darauf aufgebaut:
   - `VersionedSessions` (`lib/plausible/data_migration/versioned_sessions.ex`):
@@ -89,7 +99,7 @@ Cluster-Infrastruktur:
 Commit `8ba2b934b3` (Feb 2024, PR #3802, Autor Karl-Aksel Puulmann,
 Plausible-Core) hatte als eigentliches Ziel einen Engine-Wechsel wegen
 Dedup-Korrektheit, nicht HA. Die `cluster?`-Verzweigung kam als Nebencommit
-("cluster? extract common code") dazu -- vermutlich weil Plausible Cloud
+("cluster? extract common code") dazu, vermutlich weil Plausible Cloud
 selbst auf einem Cluster laeuft und Cloud/CE denselben Code teilen. Kein
 CHANGELOG-Eintrag, keine Doku, keine Test-Abdeckung dafuer. Es ist kein
 von Plausible gepflegtes Feature fuer Self-Hoster, sondern brauchbares,
@@ -102,7 +112,7 @@ aber unvollstaendiges Rohmaterial.
   und alle 10 `imported_*`-Tabellen
   (`priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs`)
   werden ueber `Ecto.Migration.create_if_not_exists table(..., engine: "...")`
-  angelegt. Diese DSL kennt kein `ON CLUSTER` und keine Replicated-Engine --
+  angelegt. Diese DSL kennt kein `ON CLUSTER` und keine Replicated-Engine:
   bei einer Neuinstallation landen diese Tabellen **immer** als Single-Node-
   Engine, unabhaengig vom Cluster-Status.
 - **Kein expliziter Konfig-Schalter:** Die Absicht "ich will HA" existiert
@@ -111,7 +121,7 @@ aber unvollstaendiges Rohmaterial.
 - **Inkonsistente Replikations-Checks:** `IngestRepo.clustered_table?/1`
   prueft `active_replicas > 1`; die eigene SQL-Datei
   `priv/data_migrations/NumericIDs/sql/check-replicas.sql.eex` prueft
-  stattdessen `SELECT 1 FROM system.replicas WHERE table = 'events'` --
+  stattdessen `SELECT 1 FROM system.replicas WHERE table = 'events'`:
   Tabellenname `events` statt `events_v2` ist vermutlich eine Altlast aus
   der V1-Schema-Aera und aktuell wirkungslos/potenzieller Bug.
 - **Keine Migration fuer `ingest_counters` und `imported_*`:** weder Fresh-
@@ -130,7 +140,7 @@ Single-Instance, unveraendertes Verhalten). Wichtig fuer Generizitaet: der
 tatsaechliche String-Wert dieser Variable wird **nicht** ins SQL
 interpoliert. Er dient nur als Aktivierungs-Flag. Das SQL verwendet weiterhin
 das ClickHouse-seitige Server-Makro `'{cluster}'` (wie es der bestehende
-Code bereits tut) -- der echte Cluster-Name bleibt Sache der CH-Server-Konfig
+Code bereits tut): der echte Cluster-Name bleibt Sache der CH-Server-Konfig
 (vom Altinity-Operator oder manuell per `<macros>` gepflegt), nicht des
 Elixir-Codes. Damit bleibt der Code cluster-namens-agnostisch und
 upstream-tauglich.
@@ -144,12 +154,12 @@ upstream-tauglich.
   (deckt Fresh-Install ab), zusaetzlich (nicht ersetzend)
   `IngestRepo.clustered_table?/1` als Sicherheitsnetz behalten fuer den
   Fall, dass eine Tabelle bereits repliziert ist, die Config-Variable aber
-  (aus welchem Grund auch immer) fehlt -- beide Pruefungen ODER-verknuepft.
+  (aus welchem Grund auch immer) fehlt: beide Pruefungen ODER-verknuepft.
 - Neue Funktion (Name TBD, z.B. `replicated_engine/3`) kapselt: gib die
   Replicated-Variante einer Engine mit Standard-Zookeeper-Pfad
   `/clickhouse/{cluster}/tables/{shard}/{database}/{table}` zurueck, wenn
   `cluster_enabled?/0`, sonst die Basis-Engine. Dieses Pfadmuster ist
-  bereits das, was Plausibles eigene Templates nutzen (siehe 2.1) -- wird
+  bereits das, was Plausibles eigene Templates nutzen (siehe 2.1), wird
   hier nur zentralisiert statt pro Tabelle dupliziert.
 
 ### 3.2 Fresh-Install-Pfad fuer `ingest_counters` + `imported_*`
@@ -174,13 +184,13 @@ kleines Volumen) genuegt statt Partition-Attach ein einfaches
 Im gleichen Zug: `NumericIDs`-Bug fixen (`check-replicas.sql.eex` von
 `'events'` auf `'events_v2'`, oder besser: beide Data-Migrationen auf
 `Plausible.IngestRepo.clustered_table?/1` umstellen statt eigener
-SQL-Datei -- eliminiert die Inkonsistenz strukturell).
+SQL-Datei, eliminiert die Inkonsistenz strukturell).
 
 ### 3.4 Test-Infrastruktur
 
 - Neues Compose-Setup (z.B. `docker-compose.ha-test.yml` oder
   Makefile-Target `make clickhouse-cluster`): 2x `clickhouse-server`
-  (Version **25.8.33.6-alpine**, identisch zu unserer Prod-Version -- nicht
+  (Version **25.8.33.6-alpine**, identisch zu unserer Prod-Version, nicht
   die 25.11 aus der bestehenden Single-Node-CI, siehe Risiken) + 1x
   `clickhouse-keeper` (ein Node genuegt lokal, kein 3-Node-Quorum noetig),
   mit `<remote_servers>`/`<macros>`/`<zookeeper>`-Config analog zum
@@ -198,16 +208,16 @@ SQL-Datei -- eliminiert die Inkonsistenz strukturell).
 Entscheidung (Stand 2026-09-14): Zweiphasiger Rollout mit fc-moto (fcm) als
 einzigem aktuell aktivem Plausible-Tenant. Phase A ist eine **wegwerfbare**
 Testumgebung, die nichts an fcm's echten Produktivdaten aendert. Phase B ist
-der eigentliche Cutover, **in-place** auf fcm's bestehender Produktivinstanz
--- keine zweite dauerhafte Instanz, keine Uebernahme von Daten ueber
+der eigentliche Cutover, **in-place** auf fcm's bestehender Produktivinstanz:
+keine zweite dauerhafte Instanz, keine Uebernahme von Daten ueber
 Instanzgrenzen hinweg (das wuerde eine `site_id`-Neuzuordnung noetig machen,
-da ClickHouse kein einfaches `UPDATE` kennt -- bewusst vermieden).
+da ClickHouse kein einfaches `UPDATE` kennt, bewusst vermieden).
 
-### Phase A -- Validierung mit echtem Traffic (wegwerfbar)
+### Phase A: Validierung mit echtem Traffic (wegwerfbar)
 
 1. Neue ClickHouse-Datenbank (z.B. `plausible_ha_test`) auf dem
    **bestehenden** Altinity-CHI `plausible` (kein zweiter physischer
-   Cluster noetig -- die 2 Replicas + 3-Node-Keeper-Quorum sind schon da,
+   Cluster noetig: die 2 Replicas + 3-Node-Keeper-Quorum sind schon da,
    nur fuer `plausible.*` bisher ungenutzt). Tabellen darin von Anfang an
    als `Replicated*MergeTree` ueber `ON CLUSTER 'plausible'`
    (`CLICKHOUSE_CLUSTER_NAME` gesetzt).
@@ -217,7 +227,7 @@ da ClickHouse kein einfaches `UPDATE` kennt -- bewusst vermieden).
    (analog `infra/plausible-tg-nw2/cnpg/10-role-plausible.yaml`).
 3. Neue interne Caddy-Route (analog
    `plausible.internal.wedapi.eu/api/event`, siehe
-   `infra/internal-caddy-proxy/configmap.yaml`) fuer den Test-Ingest --
+   `infra/internal-caddy-proxy/configmap.yaml`) fuer den Test-Ingest:
    **kein** neuer oeffentlicher Hostname noetig, da fcm's sGTM schon heute
    ausschliesslich intern sendet (`45-backendtrafficpolicy-plausible-event-deny.yaml`
    sperrt den oeffentlichen `/api/event`-Pfad ohnehin).
@@ -231,11 +241,11 @@ da ClickHouse kein einfaches `UPDATE` kennt -- bewusst vermieden).
    zwischen altem Dashboard und Test-HA-Dashboard vergleichen.
 7. Nach erfolgreicher Validierung: Testumgebung komplett abbauen
    (Helm-Release, CH-Test-Datenbank, CNPG-Test-DB/Rolle, Caddy-Route,
-   sGTM-Template-Option, Test-Site) -- diente nur dem Nachweis, dass Config-
+   sGTM-Template-Option, Test-Site), diente nur dem Nachweis, dass Config-
    Schalter, Engine-Wahl und `ON CLUSTER`-Pfad unter echtem Traffic
    funktionieren.
 
-### Phase B -- Cutover in-place (dieselbe Produktivinstanz)
+### Phase B: Cutover in-place (dieselbe Produktivinstanz)
 
 1. Eigenes Image aus dem Fork bauen und pushen (Konvention aus
    `platform/CLAUDE.md`: 7-stelliger Commit-Hash als Tag, kein `:latest`).
@@ -247,19 +257,19 @@ da ClickHouse kein einfaches `UPDATE` kennt -- bewusst vermieden).
    `ON CLUSTER` fuer Plausible-Tabellen genutzt wurde).
 4. Generalisierte Single->HA-Migration (`ReplicateTable`, in Phase A/CI
    bereits erprobt) fuer alle ca. 13 betroffenen Tabellen **auf fcm's
-   bestehender Produktivdatenbank** einmalig ausfuehren -- dieselbe
+   bestehender Produktivdatenbank** einmalig ausfuehren: dieselbe
    Postgres-Site, derselbe Domain-Eintrag, dieselbe `site_id`, volle
    historische Kontinuitaet ohne Datenuebernahme zwischen Instanzen.
 5. Erst danach `CLICKHOUSE_DATABASE_URL` vom gepinnten Pod
    (`chi-plausible-clickhouse-plausible-0-0.clickhouse:8123`) auf den
-   lastverteilten Service umstellen -- nicht vorher, sonst laufen Queries
+   lastverteilten Service umstellen, nicht vorher, sonst laufen Queries
    teils gegen den (dann noch leeren) Replica-1.
 6. sGTM-Dual-Send-Option aus Phase A wieder entfernen (nicht mehr noetig,
    es gibt nur noch eine Instanz).
 7. Decision Record `infra/docs/clickhouse-plausible-replication-decision.md`
    aktualisieren/schliessen.
 8. Neue Tenants nach diesem Zeitpunkt starten direkt mit
-   `CLICKHOUSE_CLUSTER_NAME` gesetzt -- kein Migrationsschritt noetig.
+   `CLICKHOUSE_CLUSTER_NAME` gesetzt: kein Migrationsschritt noetig.
 
 ## 5. Vorschlag Reihenfolge (Umsetzung)
 
@@ -271,7 +281,7 @@ da ClickHouse kein einfaches `UPDATE` kennt -- bewusst vermieden).
    neuen Helfers).
 4. Coverage der 10 `imported_*`-Tabellen.
 5. Docker-Compose-Testcluster + CI-Job (synthetische, automatisierte
-   Absicherung -- Vorstufe zu Phase A).
+   Absicherung, Vorstufe zu Phase A).
 6. Phase A: Testumgebung mit echtem fcm-Traffic (Abschnitt 4), Validierung,
    Abbau.
 7. Phase B: Cutover in-place auf fcm's Produktivinstanz (Abschnitt 4).
@@ -289,8 +299,8 @@ da ClickHouse kein einfaches `UPDATE` kennt -- bewusst vermieden).
 - **Plausible-Versions-Sprung:** Prod laeuft aktuell `v3.2.1` (offizielles
   Image), der Fork steht weit davor. Ein Rollout des Forks bringt also
   immer einen grossen Versions-Sprung mit (OAuth-Tabellen,
-  Team-Deletion-Workflows, Oban-v14) -- unabhaengig von HA, sollte separat
-  getestet werden, bevor HA obendrauf kommt.
+  Team-Deletion-Workflows, Oban-v14). Das ist unabhaengig von HA und sollte
+  separat getestet werden, bevor HA obendrauf kommt.
 - **Kein Sharding vorgesehen:** Layout bleibt 1 Shard/2 Replicas. Echtes
   Sharding waere ein deutlich groesseres, separates Vorhaben (Distributed-
   Engine, Sharding-Key-Wahl) und ist hier bewusst nicht Teil des Scopes.
