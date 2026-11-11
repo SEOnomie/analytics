@@ -1,0 +1,37 @@
+# Local ClickHouse cluster for testing CLICKHOUSE_CLUSTER_NAME (1 shard, 2 replicas).
+# Keeper runs embedded in clickhouse-1. Only clickhouse-1 is exposed on the host
+# (8123/9000), so the default test config (127.0.0.1:8123) talks to replica 1.
+#
+#   make clickhouse-cluster        # start
+#   make clickhouse-cluster-check  # verify schema after migrating with the switch
+#   make clickhouse-cluster-stop   # stop and remove volumes
+name: plausible-clickhouse-cluster
+
+x-clickhouse: &clickhouse
+  image: clickhouse/clickhouse-server:25.8.33.6-alpine
+  environment:
+    CLICKHOUSE_SKIP_USER_SETUP: 1
+  ulimits:
+    nofile:
+      soft: 262144
+      hard: 262144
+
+services:
+  clickhouse-1:
+    <<: *clickhouse
+    hostname: clickhouse-1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./clickhouse-1.xml:/etc/clickhouse-server/config.d/node.xml:ro
+
+  clickhouse-2:
+    <<: *clickhouse
+    hostname: clickhouse-2
+    depends_on:
+      - clickhouse-1
+    volumes:
+      - ./cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./clickhouse-2.xml:/etc/clickhouse-server/config.d/node.xml:ro

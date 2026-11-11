@@ -53,8 +53,8 @@ Ziel dieses Dokuments: technischer Plan fuer Branch `feature/clickhouse-ha`
 ## 2. Ist-Zustand Code (Fork, identisch zu Upstream)
 
 `master` ist ein reiner Spiegel von `plausible/analytics`. Auf
-`feature/clickhouse-ha` sind seit 2026-11-11 die Schritte 1 bis 4 (Abschnitt 5)
-umgesetzt, Details in Abschnitt 3.1 unter "Umsetzungsstand", in 3.2 und 3.3. Die Bestandsaufnahme in
+`feature/clickhouse-ha` sind seit 2026-11-11 die Schritte 1 bis 5 (Abschnitt 5)
+umgesetzt, Details in Abschnitt 3.1 unter "Umsetzungsstand", in 3.2, 3.3 und 3.4. Die Bestandsaufnahme in
 diesem Abschnitt beschreibt den Upstream-Stand vor dieser Aenderung.
 
 Abgleich 2026-11-11 (Upstream `5716baab58` -> `0c3903a941`, 130 Commits):
@@ -324,6 +324,32 @@ nur Schalter-Erkennung und den `{database}`-Pfad.
   Die interaktiven `run_sql_confirm`-Prompts muessen dafuer umgangen werden
   (direkt `run_sql`/`run_sql_multi` aufrufen statt der interaktiven
   Wrapper-Funktion).
+
+**Umsetzungsstand (2026-11-11, Schritt 5):**
+
+- `.clickhouse_cluster/`: `docker-compose.yml` mit 2x `clickhouse-server`
+  `25.8.33.6-alpine`, Keeper eingebettet in `clickhouse-1` (statt eigenem
+  Keeper-Container, ein Raft-Node genuegt lokal), Cluster `test_cluster`,
+  Makros `{cluster}`/`{shard}`/`{replica}`. Nur `clickhouse-1` ist auf dem
+  Host erreichbar (8123/9000), passend zur Test-Config `127.0.0.1:8123`.
+- `check-schema.sql`: meldet je Problem eine Zeile (nicht replizierte
+  `*MergeTree`-Tabelle, Tabelle fehlt auf einer Replica oder
+  `create_table_query` unterscheidet sich), leer = OK. `TinyLog`
+  (`schema_migrations`) ist ausgenommen.
+- Makefile: `clickhouse-cluster`, `clickhouse-cluster-db` (Datenbank `ON
+  CLUSTER` anlegen), `clickhouse-cluster-check`, `clickhouse-cluster-stop`.
+- Eigener Workflow `.github/workflows/clickhouse-cluster.yml` statt Job in
+  `elixir.yml`: laeuft auf `ubuntu-latest` (die Haupt-CI braucht
+  Blacksmith-Runner, die es im Fork nicht gibt), bei PRs mit Aenderungen an
+  Migrationen/Data-Migrationen/`MigrationUtils`/`IngestRepo`/`runtime.exs`,
+  bei Push auf `master`/`stable` und manuell. Ablauf: Cluster starten,
+  Datenbank anlegen, `ecto.migrate` mit `CLICKHOUSE_CLUSTER_NAME=test_cluster`,
+  Schema-Check, `ReplicateTable`-Cluster-Tests.
+- Die interaktiven Prompts sind kein Thema mehr: `ReplicateTable` hat keine.
+- Lokal mit dem `docker:cli`-Compose-Plugin nachgespielt: Migration mit
+  Schalter ok, Schema-Check OK (Gegenprobe mit lokaler Tabelle schlaegt wie
+  erwartet an), 27/27 Tests. Ob der Workflow im Fork auf GitHub laeuft
+  (Actions dort aktiviert?), ist noch nicht geprueft.
 
 ## 4. Rollout auf TG-Infra (zweiphasig)
 
