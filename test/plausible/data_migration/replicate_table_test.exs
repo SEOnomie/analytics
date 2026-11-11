@@ -208,8 +208,15 @@ defmodule Plausible.DataMigration.ReplicateTableTest do
         "CREATE TABLE #{table} ON CLUSTER '{cluster}' (id UInt64) ENGINE = MergeTree ORDER BY id"
       )
 
+      %{rows: [[other_replica]]} =
+        IngestRepo.query!("""
+        SELECT host_name FROM system.clusters
+        WHERE cluster = getMacro('cluster') AND is_local = 0
+        LIMIT 1
+        """)
+
       IngestRepo.query!(
-        "INSERT INTO FUNCTION remote('ch_r2', currentDatabase(), '#{table}') VALUES (1)"
+        "INSERT INTO FUNCTION remote('#{other_replica}', currentDatabase(), '#{table}') VALUES (1)"
       )
 
       assert {:error, {:data_on_other_replica, %{local_rows: 0, remote_rows: 1}}} =

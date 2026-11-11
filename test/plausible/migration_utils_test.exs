@@ -53,7 +53,7 @@ defmodule Plausible.MigrationUtilsTest do
 
     test "is empty for non-replicated tables when clustering is disabled" do
       put_cluster_name(nil)
-      assert MigrationUtils.on_cluster_statement("events_v2") == ""
+      assert MigrationUtils.on_cluster_statement("table_that_does_not_exist") == ""
     end
   end
 
