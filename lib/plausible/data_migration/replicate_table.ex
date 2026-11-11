@@ -152,7 +152,7 @@ defmodule Plausible.DataMigration.ReplicateTable do
         end
 
       nil ->
-        {:error, {:unparseable_engine, engine_full}}
+        {:error, {:unparsable_engine, engine_full}}
     end
   end
 
@@ -172,7 +172,7 @@ defmodule Plausible.DataMigration.ReplicateTable do
         {:error, :not_replicated}
 
       nil ->
-        {:error, {:unparseable_engine, engine_full}}
+        {:error, {:unparsable_engine, engine_full}}
     end
   end
 

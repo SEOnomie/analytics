@@ -70,7 +70,7 @@ jobs:
 
       - run: make clickhouse-cluster-db
       - name: Migrate with CLICKHOUSE_CLUSTER_NAME
-        run: mix do ecto.create, ecto.migrate
+        run: mix do ecto.create + ecto.migrate
         env:
           CLICKHOUSE_CLUSTER_NAME: test_cluster
       - run: make clickhouse-cluster-check

@@ -12,7 +12,9 @@ extend-exclude = [
 	"priv/repo/migrations/20231219083050_track_accept_traffic_until_notifcations.exs",
 	"priv/repo/migrations/20250429093725_backfill_enterise_plans_feautres_sites_api.exs",
 	# Refers to the migration above by name
-	"test/plausible/release_test.exs"
+	"test/plausible/release_test.exs",
+	# German design document (fork only)
+	"docs/CLICKHOUSE_HA_DESIGN.md"
 ]
 ignore-hidden = false
 
