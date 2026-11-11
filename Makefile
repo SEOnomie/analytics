@@ -1,4 +1,4 @@
-.PHONY: help install server clickhouse clickhouse-prod clickhouse-stop clickhouse-postgres-remote postgres postgres-client postgres-prod postgres-stop
+.PHONY: help install server clickhouse clickhouse-prod clickhouse-stop clickhouse-cluster clickhouse-cluster-db clickhouse-cluster-check clickhouse-cluster-stop clickhouse-postgres-remote postgres postgres-client postgres-prod postgres-stop
 
 require = \
 	  $(foreach 1,$1,$(__require))
@@ -34,6 +34,23 @@ clickhouse-prod: ## Start a container with the same version of clickhouse as the
 
 clickhouse-stop: ## Stop and remove the clickhouse container
 	docker stop plausible_clickhouse && docker rm plausible_clickhouse
+
+CH_CLUSTER_COMPOSE = docker compose -f .clickhouse_cluster/docker-compose.yml
+CH_CLUSTER_DB ?= plausible_test
+
+clickhouse-cluster: ## Start a 2-replica clickhouse cluster with keeper (for CLICKHOUSE_CLUSTER_NAME=test_cluster)
+	$(CH_CLUSTER_COMPOSE) up --detach --wait
+	timeout 60 sh -c 'until curl -sf "http://127.0.0.1:8123/?query=SELECT+1+FROM+system.zookeeper+WHERE+path=%27/%27+LIMIT+1" > /dev/null; do sleep 1; done'
+
+clickhouse-cluster-db: ## Create CH_CLUSTER_DB on all replicas (ecto.create only creates it on the connected node)
+	curl -sf http://127.0.0.1:8123/ --data-binary "CREATE DATABASE IF NOT EXISTS $(CH_CLUSTER_DB) ON CLUSTER '{cluster}' FORMAT Null"
+
+clickhouse-cluster-check: ## Check that all tables in CH_CLUSTER_DB are replicated and identical on all replicas
+	@out=$$(curl -sf "http://127.0.0.1:8123/?param_db=$(CH_CLUSTER_DB)" --data-binary @.clickhouse_cluster/check-schema.sql) || exit 1; \
+	if [ -n "$$out" ]; then echo "$$out"; exit 1; else echo "ClickHouse cluster schema OK"; fi
+
+clickhouse-cluster-stop: ## Stop the clickhouse cluster and remove its data
+	$(CH_CLUSTER_COMPOSE) down --volumes
 
 clickhouse-postgres-remote: ## Create postgres_remote database in ClickHouse for querying PostgreSQL
 	$(eval POSTGRES_IP := $(shell docker inspect plausible_db --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'))

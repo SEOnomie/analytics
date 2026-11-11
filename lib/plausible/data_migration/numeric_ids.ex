@@ -41,11 +41,13 @@ defmodule Plausible.DataMigration.NumericIDs do
 
     @repo.start(db_url, max_threads)
 
+    # `check-replicas` looks at the V1 `events` table, the source of this migration.
     cluster? =
-      case run_sql("check-replicas") do
-        {:ok, %{num_rows: 0}} -> false
-        {:ok, %{num_rows: 1}} -> true
-      end
+      Plausible.MigrationUtils.cluster_enabled?() or
+        case run_sql("check-replicas") do
+          {:ok, %{num_rows: 0}} -> false
+          {:ok, %{num_rows: _}} -> true
+        end
 
     {:ok, %{rows: partitions}} =
       run_sql("list-partitions", start_from: start_from, stop_at: stop_at)

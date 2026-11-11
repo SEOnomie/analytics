@@ -1,0 +1,87 @@
+name: ClickHouse cluster
+
+# Runs ingest migrations with CLICKHOUSE_CLUSTER_NAME against a 2-replica
+# ClickHouse cluster and checks that every table ends up replicated and identical
+# on all replicas. Also runs the ReplicateTable cluster tests.
+
+on:
+  pull_request:
+    paths:
+      - "priv/ingest_repo/migrations/**"
+      - "priv/data_migrations/**"
+      - "lib/plausible/data_migration/**"
+      - "lib/plausible/data_migration.ex"
+      - "lib/plausible/migration_utils.ex"
+      - "lib/plausible/ingest_repo.ex"
+      - "config/runtime.exs"
+      - ".clickhouse_cluster/**"
+      - ".github/workflows/clickhouse-cluster.yml"
+  push:
+    branches: [master, stable]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  migrate:
+    name: Migrations and ReplicateTable on a replicated cluster (${{ matrix.mix_env }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mix_env: ["test", "ce_test"]
+    env:
+      MIX_ENV: ${{ matrix.mix_env }}
+      # database name from config/.env.<mix_env>
+      CH_CLUSTER_DB: ${{ matrix.mix_env == 'ce_test' && 'plausible_ce_test' || 'plausible_test' }}
+    services:
+      postgres:
+        image: postgres:18
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_PASSWORD: postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: marocchino/tool-versions-action@4219f2e6bfdb4cce482b78f71ad9663e64f4d247 # v2.0.0
+        id: versions
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+          otp-version: ${{ steps.versions.outputs.erlang }}
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            deps
+            _build
+          key: clickhouse-cluster-${{ env.MIX_ENV }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            clickhouse-cluster-${{ env.MIX_ENV }}-
+
+      - run: make clickhouse-cluster
+      - run: mix deps.get --only $MIX_ENV
+      - run: mix compile --warnings-as-errors --all-warnings
+
+      - name: Wait for Postgres
+        run: timeout 120 bash -c 'until docker exec ${{ job.services.postgres.id }} pg_isready -h 127.0.0.1 -U postgres -q; do sleep 0.5; done'
+
+      - run: make clickhouse-cluster-db
+      - name: Migrate with CLICKHOUSE_CLUSTER_NAME
+        run: mix do ecto.create + ecto.migrate
+        env:
+          CLICKHOUSE_CLUSTER_NAME: test_cluster
+      - run: make clickhouse-cluster-check
+
+      - run: mix test --include clickhouse_cluster --warnings-as-errors test/plausible/data_migration/replicate_table_test.exs test/plausible/migration_utils_test.exs
+
+      - if: always()
+        run: make clickhouse-cluster-stop

@@ -4,11 +4,17 @@ defmodule Plausible.IngestRepo.Migrations.CreateIngestCountersTable do
   def change do
     create_if_not_exists table(:ingest_counters,
                            primary_key: false,
-                           engine: "SummingMergeTree(value)",
-                           options: """
-                             ORDER BY (domain, toDate(event_timebucket), metric, toStartOfMinute(event_timebucket))
-                             #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "SummingMergeTree",
+                               "ingest_counters",
+                               args: ["value"]
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by:
+                                 "(domain, toDate(event_timebucket), metric, toStartOfMinute(event_timebucket))"
+                             )
                          ) do
       add(:event_timebucket, :utc_datetime)
       add(:domain, :"LowCardinality(String)")

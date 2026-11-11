@@ -12,17 +12,18 @@ defmodule Plausible.IngestRepo.Migrations.CreateV2Schemas do
 
   use Plausible.DataMigration, dir: "NumericIDs"
 
-  @cluster? false
-
   def up do
     table_settings = Plausible.MigrationUtils.table_settings_expr()
+    cluster? = Plausible.MigrationUtils.cluster_enabled?()
 
-    execute unwrap("create-events-v2", table_settings: table_settings, cluster?: @cluster?)
-    execute unwrap("create-sessions-v2", table_settings: table_settings, cluster?: @cluster?)
+    execute unwrap("create-events-v2", table_settings: table_settings, cluster?: cluster?)
+    execute unwrap("create-sessions-v2", table_settings: table_settings, cluster?: cluster?)
   end
 
   def down do
-    execute unwrap("drop-events-v2", cluster?: @cluster?)
-    execute unwrap("drop-sessions-v2", cluster?: @cluster?)
+    cluster? = Plausible.MigrationUtils.cluster_enabled?()
+
+    execute unwrap("drop-events-v2", cluster?: cluster?)
+    execute unwrap("drop-sessions-v2", cluster?: cluster?)
   end
 end

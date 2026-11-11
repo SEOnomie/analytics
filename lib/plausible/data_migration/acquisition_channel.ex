@@ -20,6 +20,16 @@ defmodule Plausible.DataMigration.AcquisitionChannel do
     # In distributed environments, wait for insert to all temporary tables.
     insert_quorum = Plausible.IngestRepo.replica_count("sessions_v2")
 
+    # With ON CLUSTER, replicas resolve unqualified dictionary names in their default
+    # database while validating the materialized column, so qualify them there.
+    dictionary_prefix =
+      if on_cluster_statement != "" do
+        {:ok, %{rows: [[db]]}} = @repo.query("SELECT currentDatabase()")
+        "#{db}."
+      else
+        ""
+      end
+
     :ok =
       run_sql_multi(
         "acquisition_channel_functions",
@@ -27,7 +37,8 @@ defmodule Plausible.DataMigration.AcquisitionChannel do
           on_cluster_statement: on_cluster_statement,
           table_settings: Plausible.MigrationUtils.table_settings_expr(),
           dictionary_connection_params: Plausible.MigrationUtils.dictionary_connection_params(),
-          insert_quorum: insert_quorum
+          insert_quorum: insert_quorum,
+          dictionary_prefix: dictionary_prefix
         ],
         params: %{
           "source_categories" =>
