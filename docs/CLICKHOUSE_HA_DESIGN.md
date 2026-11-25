@@ -1,7 +1,7 @@
 ---
 status: draft
 autor: Andreas Kaiser (kaiser@tracking-garden.com)
-stand: 2026-11-11
+stand: 2026-11-25
 ---
 
 # ClickHouse HA fuer Plausible: Bestandsaufnahme und Design
@@ -16,6 +16,24 @@ Ziel dieses Dokuments: technischer Plan fuer Branch `feature/clickhouse-ha`
 3. Design bleibt generisch (kein Hardcoding von Cluster-Namen oder
    TG-Infra-Spezifika), damit ein spaeterer PR gegen `plausible:master`
    realistisch bleibt.
+
+**Basis-Branches (seit 2026-11-25):** Fuer den Rollout auf TG-Infra gilt
+`feature/clickhouse-ha-v3.2`, aufgesetzt auf das CE-Release `v3.2.2` (Prod
+lief vorher auf `v3.2.1`, ab 2026-11-25 auf `v3.2.2`). Hintergrund: Upstream
+veroeffentlicht CE-Releases aus eigenen Zweigen (`release-v3.2.2`, Abzweig
+2025-12-23), `master` war zu dem Zeitpunkt 589 Commits weiter (+20 Postgres-,
++7 ClickHouse-Migrationen). Auf `master`-Basis haette Phase B einen Sprung auf
+einen unveroeffentlichten Stand bedeutet. `feature/clickhouse-ha` (Basis
+`master`) bleibt fuer einen spaeteren Upstream-PR bestehen.
+
+Portierung per Cherry-Pick, Konflikte nur durch master-exklusive
+Upstream-Aenderungen (Funktion `acquisition_channel_has_category_ai_assistants`,
+Make-Target `clickhouse-postgres-remote`, `.typos.toml`). Nachweise: CI-Job
+"ClickHouse cluster" (test, ce_test) gruen; Schalter aus ergibt ein
+byte-identisches Schema zu `v3.2.2` (23 Tabellen/Dicts, CH 25.8.33.6);
+Prod-DB `plausible` entspricht `v3.2.2` bis auf die Zugangsdaten in den
+Dictionary-Quellen. Damit bringt Phase B auf dieser Basis keine Postgres-
+oder ClickHouse-Migrationen mit, nur die HA-Umstellung.
 
 ## 1. Ist-Zustand Infra (`platform/infra/`)
 
