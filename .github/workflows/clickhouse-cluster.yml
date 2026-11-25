@@ -29,14 +29,17 @@ concurrency:
 
 jobs:
   migrate:
-    name: Migrations and ReplicateTable on a replicated cluster (${{ matrix.mix_env }})
+    name: Migrations and ReplicateTable on a replicated cluster (${{ matrix.mix_env }}, CH ${{ matrix.clickhouse }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         mix_env: ["test", "ce_test"]
+        # 25.8 = TG prod, 26.8 = next LTS (upgrade candidate)
+        clickhouse: ["25.8.33.6", "26.8.46.6"]
     env:
       MIX_ENV: ${{ matrix.mix_env }}
+      CH_IMAGE: clickhouse/clickhouse-server:${{ matrix.clickhouse }}-alpine
       # database name from config/.env.test (v3.2.x has no .env.ce_test, ce_test loads .env.test)
       CH_CLUSTER_DB: plausible_test
     services:

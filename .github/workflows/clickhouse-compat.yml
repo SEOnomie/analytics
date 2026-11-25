@@ -1,0 +1,95 @@
+name: ClickHouse compatibility
+
+# Fork only (SEOnomie/analytics): runs the full CE test suite against several
+# ClickHouse versions to evaluate a ClickHouse upgrade. Same steps as the build
+# job in elixir.yml, but on GitHub-hosted runners, CE only and without
+# --max-failures so that all differences show up. 25.11.5.8 is the version the
+# upstream CI of this release uses (baseline).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/clickhouse-compat.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: "CE tests (CH ${{ matrix.clickhouse }}, ${{ matrix.mix_test_partition }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        clickhouse: ["25.11.5.8", "26.8.46.6"]
+        mix_test_partition: [1, 2, 3, 4, 5, 6]
+    env:
+      MIX_ENV: ce_test
+    services:
+      postgres:
+        image: postgres:18
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      clickhouse:
+        image: clickhouse/clickhouse-server:${{ matrix.clickhouse }}-alpine
+        ports:
+          - 8123:8123
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: marocchino/tool-versions-action@18a164fa2b0db1cc1edf7305fcb17ace36d1c306 # v1.2.0
+        id: versions
+      - uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          elixir-version: ${{ steps.versions.outputs.elixir }}
+          otp-version: ${{ steps.versions.outputs.erlang }}
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: ${{ steps.versions.outputs.nodejs }}
+
+      - uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            deps
+            _build
+            tracker/node_modules
+            priv/tracker/js
+            priv/tracker/installation_support
+          key: compat-ce_test-${{ hashFiles('**/mix.lock', 'tracker/package-lock.json') }}
+
+      - name: Build tracker and verifier
+        run: |
+          if [ ! -f priv/tracker/js/plausible-web.js ] || [ ! -f priv/tracker/installation_support/verifier.js ]; then
+            npm install --prefix ./tracker
+            npm run deploy --prefix ./tracker
+          fi
+
+      - run: mix deps.get --only $MIX_ENV
+      - run: mix compile --warnings-as-errors --all-warnings
+      - run: mix do ecto.create + ecto.migrate
+      - run: mix run -e "Tzdata.ReleaseUpdater.poll_for_update"
+
+      - run: mix test --include slow --include migrations --warnings-as-errors --partitions 6
+        env:
+          MIX_TEST_PARTITION: ${{ matrix.mix_test_partition }}
