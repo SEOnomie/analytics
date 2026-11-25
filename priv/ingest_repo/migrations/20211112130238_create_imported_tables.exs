@@ -4,11 +4,13 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
   def change do
     create_if_not_exists table(:imported_visitors,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_visitors"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(order_by: "(site_id, date)")
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -21,11 +23,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_sources,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, source)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_sources"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, source)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -42,11 +48,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_pages,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, hostname, page)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_pages"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, hostname, page)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -60,11 +70,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_entry_pages,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, entry_page)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_entry_pages"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, entry_page)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -77,11 +91,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_exit_pages,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, exit_page)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_exit_pages"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, exit_page)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -92,11 +110,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_locations,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, country, region, city)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_locations"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, country, region, city)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -111,11 +133,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_devices,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, device)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_devices"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, device)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -128,11 +154,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_browsers,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, browser)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_browsers"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, browser)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)
@@ -145,11 +175,15 @@ defmodule Plausible.ClickhouseRepo.Migrations.CreateImportedVisitors do
 
     create_if_not_exists table(:imported_operating_systems,
                            primary_key: false,
-                           engine: "MergeTree",
-                           options: """
-                           ORDER BY (site_id, date, operating_system)
-                           #{Plausible.MigrationUtils.table_settings_expr()}
-                           """
+                           engine:
+                             Plausible.MigrationUtils.replicated_engine(
+                               "MergeTree",
+                               "imported_operating_systems"
+                             ),
+                           options:
+                             Plausible.MigrationUtils.table_options(
+                               order_by: "(site_id, date, operating_system)"
+                             )
                          ) do
       add(:site_id, :UInt64)
       add(:date, :date)

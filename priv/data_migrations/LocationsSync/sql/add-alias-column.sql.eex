@@ -2,4 +2,4 @@ ALTER TABLE <%= @table %>
 <%= if @cluster? do %>ON CLUSTER '{cluster}'<% end %>
 ADD COLUMN IF NOT EXISTS
 <%= @column_name %> String
-ALIAS dictGet('location_data_dict', 'name', tuple('<%= @type %>', <%= @input_column %>))
+ALIAS dictGet('<%= @dictionary %>', 'name', tuple('<%= @type %>', <%= @input_column %>))

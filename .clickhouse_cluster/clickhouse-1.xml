@@ -1,0 +1,17 @@
+<clickhouse>
+  <macros>
+    <cluster>test_cluster</cluster>
+    <shard>01</shard>
+    <replica>clickhouse-1</replica>
+  </macros>
+  <interserver_http_host>clickhouse-1</interserver_http_host>
+  <keeper_server>
+    <tcp_port>9181</tcp_port>
+    <server_id>1</server_id>
+    <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+    <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+    <raft_configuration>
+      <server><id>1</id><hostname>clickhouse-1</hostname><port>9234</port></server>
+    </raft_configuration>
+  </keeper_server>
+</clickhouse>

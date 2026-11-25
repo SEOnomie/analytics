@@ -88,7 +88,7 @@ defmodule Plausible.DataMigration.LocationsSync do
   end
 
   def run() do
-    cluster? = Plausible.IngestRepo.clustered_table?("sessions_v2")
+    cluster? = Plausible.MigrationUtils.cluster?("sessions_v2")
 
     {:ok, _} = run_sql("truncate-location-data-table", cluster?: cluster?)
 
@@ -125,10 +125,21 @@ defmodule Plausible.DataMigration.LocationsSync do
         dictionary_connection_params: Plausible.MigrationUtils.dictionary_connection_params()
       )
 
+    # With ON CLUSTER, other replicas resolve unqualified dictionary names in their
+    # default database, so the dictionary is qualified explicitly there.
+    dictionary =
+      if cluster? do
+        {:ok, %{rows: [[db]]}} = @repo.query("SELECT currentDatabase()")
+        "#{db}.location_data_dict"
+      else
+        "location_data_dict"
+      end
+
     for column <- @columns do
       {:ok, _} =
         run_sql("add-alias-column",
           cluster?: cluster?,
+          dictionary: dictionary,
           table: column.table,
           column_name: column.column_name,
           type: column.type,
