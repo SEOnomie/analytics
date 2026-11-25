@@ -22,7 +22,8 @@ concurrency:
 jobs:
   test:
     name: "CE tests (CH ${{ matrix.clickhouse }}, ${{ matrix.mix_test_partition }})"
-    runs-on: ubuntu-latest
+    # 24.04 like upstream; setup-beam v1.24.0 does not know ubuntu26 (ubuntu-latest)
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -48,11 +49,6 @@ jobs:
           - 8123:8123
         env:
           CLICKHOUSE_SKIP_USER_SETUP: 1
-        options: >-
-          --health-cmd "wget -qO- http://localhost:8123/ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -84,6 +80,9 @@ jobs:
             npm install --prefix ./tracker
             npm run deploy --prefix ./tracker
           fi
+
+      - name: Wait for ClickHouse
+        run: timeout 120 bash -c 'until curl -sf http://127.0.0.1:8123/ping; do sleep 1; done'
 
       - run: mix deps.get --only $MIX_ENV
       - run: mix compile --warnings-as-errors --all-warnings
