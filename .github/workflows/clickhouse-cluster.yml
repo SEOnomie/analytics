@@ -37,8 +37,8 @@ jobs:
         mix_env: ["test", "ce_test"]
     env:
       MIX_ENV: ${{ matrix.mix_env }}
-      # database name from config/.env.<mix_env>
-      CH_CLUSTER_DB: ${{ matrix.mix_env == 'ce_test' && 'plausible_ce_test' || 'plausible_test' }}
+      # database name from config/.env.test (v3.2.x has no .env.ce_test, ce_test loads .env.test)
+      CH_CLUSTER_DB: plausible_test
     services:
       postgres:
         image: postgres:18
